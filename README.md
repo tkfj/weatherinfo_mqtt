@@ -1,0 +1,2 @@
+# weatherinfo_mqtt
+気象庁の天気予報、気象観測情報をHomeAssistantで拾う想定のMQTTに垂れ流します
