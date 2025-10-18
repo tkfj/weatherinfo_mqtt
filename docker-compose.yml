@@ -1,0 +1,24 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      # 上記Dockerfileのビルド引数 (UID/GID) を必要に応じて指定
+      args:
+        USER_UID: 1000
+        # USER_GID: 1001
+
+    volumes:
+      # ソースコードをコンテナ内へマウント（:cached や :delegated を付けることでパフォーマンス向上する場合あり）
+      - type: bind
+        source: .
+        target: /usr/src/app
+        consistency: cached
+      # # node_modules だけは名前付きボリュームにする例
+      # - type: volume
+      #   source:  node_modules
+      #   target: /usr/src/app/node_modules
+
+      - ~/.ssh:/home/devuser/.ssh:ro
+    user: "devuser"
+    restart: "no" #終了時にコンテナ削除
