@@ -23,3 +23,9 @@ def parse_dt_str(dt_str:str)->datetime.datetime:
 
 def format_dt_str(dt:datetime.datetime)->str:
     return dt.isoformat()
+
+area_url : str = 'https://www.jma.go.jp/bosai/common/const/area.json'
+def get_area_cd_office_by_class10(area_cd)-> str:
+    area_data = fetch_json(area_url)
+    return area_data['class10s'][area_cd]['parent']
+

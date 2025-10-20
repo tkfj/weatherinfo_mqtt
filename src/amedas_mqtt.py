@@ -6,10 +6,13 @@ import dotenv
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
-from jma_common import parse_dt_str
+from pprint import pprint
+
+from jma_common import parse_dt_str, get_area_cd_office_by_class10
 from jma_amedas import get_amedas_latest_time, get_amedas_point_data_latest, amedas_data_flatten
 from jma_vpfd import get_vpfd_data_pretty
 from jma_forecast import get_forecast_data_pretty
+from jma_nowcast import get_nowc_forecast
 
 dotenv.load_dotenv()
 
@@ -20,6 +23,10 @@ mqtt_password = os.environ.get('MQTT_PASSWORD')
 mqtt_topic_amedas_stat = os.environ.get('MQTT_TOPIC_AMEDAS_STAT')
 mqtt_topic_amedas_attr = os.environ.get('MQTT_TOPIC_AMEDAS_ATTR')
 mqtt_topic_amedas_avty = os.environ.get('MQTT_TOPIC_AMEDAS_AVTY')
+
+map_lat=float(os.environ['NOWCAST_RAIN_LAT'])
+map_lon=float(os.environ['NOWCAST_RAIN_LNG'])
+
 
 amedas_point_cd = os.environ.get('JMA_AMEDAS_POINT_CD')
 
@@ -60,17 +67,17 @@ while True:
 pxl_color=img1.getpixel((bunpu_tile_pxl_x,bunpu_tile_pxl_y))
 match pxl_color:
     case (0xff, 0xaa, 0x00, 0xff):
-        weather = 'sunny' if 6<=amedas_latest_time.hour<18 else 'clear-night'
+        bunpu_weather = 'sunny' if 6<=amedas_latest_time.hour<18 else 'clear-night'
     case (0xaa, 0xaa, 0xaa, 0xff):
-        weather = 'cloudy'
+        bunpu_weather = 'cloudy'
     case (0x00, 0x41, 0xff, 0xff):
-        weather = 'rainy'
+        bunpu_weather = 'rainy'
     case (0xf2, 0xf2, 0xff, 0xff):
-        weather = 'snowy'
+        bunpu_weather = 'snowy'
     case (0xa0, 0xd2, 0xff, 0xff):
-        weather = 'snowy-rainy'
+        bunpu_weather = 'snowy-rainy'
     case _:
-        weather = 'exceptional'
+        bunpu_weather = 'exceptional'
 
 
 def convert_vpdf_weather(w: str, dtstr: str|None = None)-> str:
@@ -105,9 +112,43 @@ def convert_vpdf_direction(d: str)-> int:
         case '北西':
             return 315
 #TODO 晴れか曇りの場合、降雨レーダーも参照する. とにかく降雨を逃さないように
-print(pxl_color, weather )
-vpfd=get_vpfd_data_pretty('130010')
-fcst=get_forecast_data_pretty('130000','130010')
+#TODO 降雨レーダー由来の場合、0度未満→雪、0−2度→雨か雪、それ以上→雨 扱いで。
+# むしろ天気分布は更新間隔が遅すぎるので降雨レーダー由来だけで良いのでは。
+print(pxl_color, bunpu_weather )
+
+# ナウキャスト降雨情報
+nowc_forecast = get_nowc_forecast(map_lat,map_lon)
+pprint(nowc_forecast)
+if nowc_forecast[0][2]==0 and nowc_forecast[1][2]==0:
+    nowc_weather = 'clear'
+else:
+    nowc_weather = 'rainy'
+
+if nowc_weather == 'rainy':
+    if amedas_data['temp']>2:
+        overall_weather = 'rainy'
+    elif amedas_data['temp']<0:
+        overall_weather = 'snowy'
+    else:
+        overall_weather = 'snowy-rainy'
+elif bunpu_weather in ['rainy','snowy-rainy','snowy']:
+    overall_weather = 'cloudy'
+    if amedas_data['sun10m']>0:
+        overall_weather = 'clear'
+    else:
+        overall_weather = 'cloudy'
+elif amedas_data['sun10m']>0:
+    overall_weather = 'clear'
+else:
+    overall_weather = bunpu_weather
+
+if overall_weather in ['clear','sunny','clear-night']:
+    overall_weather = 'sunny' if 6<=amedas_latest_time.hour<18 else 'clear-night'
+
+area_cd = '130010'
+area_cd_parent = get_area_cd_office_by_class10(area_cd)
+vpfd=get_vpfd_data_pretty(area_cd)
+fcst=get_forecast_data_pretty(area_cd_parent, area_cd)
 fcst_h=[
     {
         'datetime': _x['datetime'],
@@ -127,10 +168,12 @@ fcst_d=[
         'templow':_x['temp_min'],
     } for _t,_x in fcst.items() if parse_dt_str(_t) > datetime.datetime.now().astimezone(datetime.timezone.utc)
 ]
-amedas_data['bunpu_weather'] = weather
+amedas_data['nowc_weather'] = nowc_weather
+amedas_data['bunpu_weather'] = bunpu_weather
+amedas_data['overall_weather'] = overall_weather
 amedas_data['forecast_hourly'] = fcst_h
 amedas_data['forecast_daily'] = fcst_d
-pub1 = mqtt_cli.publish(mqtt_topic_amedas_stat, weather, qos=1, retain=True)
+pub1 = mqtt_cli.publish(mqtt_topic_amedas_stat, overall_weather, qos=1, retain=True)
 pub2 = mqtt_cli.publish(mqtt_topic_amedas_attr, json.dumps(amedas_data), qos=1, retain=True)
 pub3 = mqtt_cli.publish(mqtt_topic_amedas_avty, 'online', qos=1, retain=True)
 
@@ -141,6 +184,5 @@ pub3.wait_for_publish()
 
 mqtt_cli.disconnect()
 mqtt_cli.loop_stop()
-from pprint import pprint
 pprint(amedas_data)
 

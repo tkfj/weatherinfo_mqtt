@@ -5,9 +5,11 @@
 import copy
 from pprint import pprint
 import datetime
-from jma_common import fetch_json, parse_dt_str, format_dt_str
+from jma_common import fetch_json, parse_dt_str, format_dt_str, get_area_cd_office_by_class10
+
 
 forecast_url_format : str = 'https://www.jma.go.jp/bosai/forecast/data/forecast/{area_cd}.json'
+
 weather_code_labels = {
     '100': '晴れ',
     '101': '晴れ時々くもり',
@@ -104,6 +106,8 @@ def get_forecast_data_sub(area_cd: str, area_sub_cd: str) -> dict:
     data_sel = copy.deepcopy(data_raw)
     for _as in data_sel[0]['timeSeries']:
         sel(_as)
+    #TODO 3日天気予報より7日天気予報のほうが予報地点が少ない。マッピング用のjsonがある？。week_area05.json
+    #むしろweek_area.jsonがすべて持ってるのでは。
     for _as in data_sel[1]['timeSeries']:
         sel(_as)
     sel(data_sel[1]['precipAverage'])
@@ -162,7 +166,7 @@ def get_forecast_data_pretty(area_cd: str, area_sub_cd: str) -> dict:
     def norm(_d: dict):
         if "pops" in _d:
             if isinstance(_d["pops"], list):
-                pops = max(map(lambda x: int(x), _d["pops"]))
+                pops = max(map(int, _d["pops"]))
             elif isinstance(_d["pops"],str):
                 pops = int(_d["pops"])
             else:
@@ -207,8 +211,7 @@ def get_forecast_data_pretty(area_cd: str, area_sub_cd: str) -> dict:
     return { _t: norm(_v) for _t,_v in ret.items() }
 
 if __name__ == '__main__':
-    # TODO 130010  から、area.jsonみたいなのでparentをひっぱって、そのURLでデータをとって、そこから見つけ出せ？
-    area_cd : str = '130000' # 東京-東京
-    area_sub_cd : str = '130010' # 東京-東京
-    data_j : dict = get_forecast_data_pretty(area_cd, area_sub_cd)
+    area_cd : str = '130010' # 東京-東京
+    area_cd_parent : str = get_area_cd_office_by_class10(area_cd)
+    data_j : dict = get_forecast_data_pretty(area_cd_parent, area_cd)
     pprint(data_j)
