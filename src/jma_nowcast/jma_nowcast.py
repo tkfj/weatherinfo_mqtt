@@ -7,11 +7,9 @@ from io import BytesIO
 import copy
 
 from PIL import Image
-import requests
 
-from jma_common import fetch_json
+from jma_common import fetch_json, fetch_binary
 
-_DEBUG_ADDRESS_=False
 _DEBUG_STORE_IMG_=False
 
 
@@ -75,11 +73,8 @@ def latlng_to_tile_pixel(lat, lng, zoom):
 
 
 def load_image_url(url):
-    print(url)
-    resp_img = requests.get(url)
-    print(f'{resp_img.status_code} {resp_img.reason}')
-    resp_img.raise_for_status()
-    img_raw = Image.open(BytesIO(resp_img.content))
+    binary:bytes = fetch_binary(url)
+    img_raw = Image.open(BytesIO(binary))
     # パレットモードのような挙動を示ことがある(getpixelの戻りが単一の数字になる)ので明示的にRGBAにコンバートする
     img_cnv = img_raw.convert('RGBA')
     return img_cnv
@@ -104,13 +99,6 @@ def get_nowc_forecast(lat,lon,zoom=10):
         raise ValueError('Zoomレベルは4から14の間で指定してください')
 
     rain_tile_x, rain_tile_y, rain_pxl_x, rain_pxl_y = latlng_to_tile_pixel(lat, lon, rain_zoom)
-    # print(
-    #     f'{rain_zoom=}\n'
-    #     f'{rain_tile_x=}\n'
-    #     f'{rain_tile_y=}\n'
-    #     f'{rain_pxl_x=}\n'
-    #     f'{rain_pxl_y=}\n'
-    # )
 
     # N1 過去のタイムライン basetimeとvalidtimeは同じ elementsにhrpnsが含まれる(降雨ナウキャスト)
     # N2 basetimeはN1の最新と同じ(N2が更新が遅く1世代前のこともある)、validtimeがbasetimeの未来時刻で5分間隔で60分後まで(１２枚)
@@ -155,7 +143,3 @@ if __name__ == '__main__':
     map_lon=float(os.environ['NOWCAST_RAIN_LNG'])
     map_zoom=int(os.environ['NOWCAST_RAIN_ZOOM'])
     nowc_forecast = get_nowc_forecast(map_lat, map_lon, zoom=map_zoom)
-
-
-
-

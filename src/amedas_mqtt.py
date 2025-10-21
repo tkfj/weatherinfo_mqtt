@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import operator
 
 import dotenv
 import paho.mqtt.client as mqtt
@@ -8,11 +9,12 @@ from paho.mqtt.enums import CallbackAPIVersion
 
 from pprint import pprint
 
-from jma_common import parse_dt_str, get_area_cd_office_by_class10
+from jma_common import parse_dt_str, get_area_cd_office_by_class10,get_area_cd_class10_by_class15,get_area_cd_class15_by_class20,fetch_text,fetch_image
 from jma_amedas import get_amedas_latest_time, get_amedas_point_data_latest, amedas_data_flatten
 from jma_vpfd import get_vpfd_data_pretty
 from jma_forecast import get_forecast_data_pretty
 from jma_nowcast import get_nowc_forecast
+from jma_bunpu import get_bunpu_area_coordinates
 
 dotenv.load_dotenv()
 
@@ -27,41 +29,26 @@ mqtt_topic_amedas_avty = os.environ.get('MQTT_TOPIC_AMEDAS_AVTY')
 map_lat=float(os.environ['NOWCAST_RAIN_LAT'])
 map_lon=float(os.environ['NOWCAST_RAIN_LNG'])
 
-
 amedas_point_cd = os.environ.get('JMA_AMEDAS_POINT_CD')
+
+area_cd_class20 = os.environ.get('JMA_AREA_CD_CLASS20')
+area_cd_class15 = get_area_cd_class15_by_class20(area_cd_class20)
+area_cd_class10 = get_area_cd_class10_by_class15(area_cd_class15)
+area_cd_office = get_area_cd_office_by_class10(area_cd_class10)
+
 
 amedas_data = amedas_data_flatten(get_amedas_point_data_latest(amedas_point_cd))
 
-mqtt_cli = mqtt.Client(CallbackAPIVersion.VERSION2)
-if (mqtt_username) or (mqtt_password):
-    mqtt_cli.username_pw_set(mqtt_username, mqtt_password) 
-mqtt_cli.connect(mqtt_broker, mqtt_port, 60)
-mqtt_cli.loop_start()
-
-from PIL import Image
-from io import BytesIO
-import requests
-
-def load_image_url(url):
-    print(url)
-    resp_img = requests.get(url)
-    print(f'{resp_img.status_code} {resp_img.reason}')
-    if resp_img.status_code == 404:
-        return None
-    resp_img.raise_for_status()
-    return Image.open(BytesIO(resp_img.content))
-
-
-
-bunpu_tile_cd='3016'
-bunpu_tile_pxl_x=425
-bunpu_tile_pxl_y=206
+bunpu_tile_cd, bunpu_tile_pxl_x, bunpu_tile_pxl_y = get_bunpu_area_coordinates(map_lat,map_lon)
 
 amedas_latest_time = get_amedas_latest_time()
 while True:
     amedas_latest_time_s = amedas_latest_time.strftime('%Y%m%d%H')+'00'
-    img1 = load_image_url(f'https://www.data.jma.go.jp/bunpu/img/wthr/{bunpu_tile_cd}/wthr_{bunpu_tile_cd}_{amedas_latest_time_s}.png')
-    if img1 is not None: 
+    img1 = fetch_image(f'https://www.data.jma.go.jp/bunpu/img/wthr/{bunpu_tile_cd}/wthr_{bunpu_tile_cd}_{amedas_latest_time_s}.png')
+    # ご参考：
+    # 地形地図： https://www.data.jma.go.jp/bunpu/img/bgmap/bg_{bunpu_tile_cd}.jpg
+    # 行政地図： https://www.data.jma.go.jp/bunpu/img/munic/munic_{bunpu_tile_cd}.png
+    if img1 is not None:
         break
     amedas_latest_time = amedas_latest_time - datetime.timedelta(hours=1)
 pxl_color=img1.getpixel((bunpu_tile_pxl_x,bunpu_tile_pxl_y))
@@ -111,9 +98,6 @@ def convert_vpdf_direction(d: str)-> int:
             return 270
         case '北西':
             return 315
-#TODO 晴れか曇りの場合、降雨レーダーも参照する. とにかく降雨を逃さないように
-#TODO 降雨レーダー由来の場合、0度未満→雪、0−2度→雨か雪、それ以上→雨 扱いで。
-# むしろ天気分布は更新間隔が遅すぎるので降雨レーダー由来だけで良いのでは。
 print(pxl_color, bunpu_weather )
 
 # ナウキャスト降雨情報
@@ -145,10 +129,8 @@ else:
 if overall_weather in ['clear','sunny','clear-night']:
     overall_weather = 'sunny' if 6<=amedas_latest_time.hour<18 else 'clear-night'
 
-area_cd = '130010'
-area_cd_parent = get_area_cd_office_by_class10(area_cd)
-vpfd=get_vpfd_data_pretty(area_cd)
-fcst=get_forecast_data_pretty(area_cd_parent, area_cd)
+vpfd=get_vpfd_data_pretty(area_cd_class10)
+fcst=get_forecast_data_pretty(area_cd_office, area_cd_class10)
 fcst_h=[
     {
         'datetime': _x['datetime'],
@@ -173,6 +155,15 @@ amedas_data['bunpu_weather'] = bunpu_weather
 amedas_data['overall_weather'] = overall_weather
 amedas_data['forecast_hourly'] = fcst_h
 amedas_data['forecast_daily'] = fcst_d
+
+pprint(amedas_data)
+
+mqtt_cli = mqtt.Client(CallbackAPIVersion.VERSION2)
+if (mqtt_username) or (mqtt_password):
+    mqtt_cli.username_pw_set(mqtt_username, mqtt_password) 
+mqtt_cli.connect(mqtt_broker, mqtt_port, 60)
+mqtt_cli.loop_start()
+
 pub1 = mqtt_cli.publish(mqtt_topic_amedas_stat, overall_weather, qos=1, retain=True)
 pub2 = mqtt_cli.publish(mqtt_topic_amedas_attr, json.dumps(amedas_data), qos=1, retain=True)
 pub3 = mqtt_cli.publish(mqtt_topic_amedas_avty, 'online', qos=1, retain=True)
@@ -184,5 +175,3 @@ pub3.wait_for_publish()
 
 mqtt_cli.disconnect()
 mqtt_cli.loop_stop()
-pprint(amedas_data)
-
