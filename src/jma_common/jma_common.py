@@ -36,11 +36,22 @@ class _cache:
         self.set_cache(cache_key, raw)
         return raw
 
-    def fetch(self, datatype:type, url:str, **kwargs)->str|bytes:
+    def fetch(self, datatype:type, url:str, raise_error:bool=True, **kwargs)->str|bytes:
         """
-        get data not using cache
+        get data from URL, not use cache
         """
-        resp = _fetch(url, **kwargs)
+        if _DEBUG_ADDRESS_:
+            print(url)
+        if 'timeout' in kwargs:
+            timeout = kwargs['timeout']
+            del kwargs['timeout']
+        else:
+            timeout = 3000
+        resp = requests.get(url, timeout=timeout, **kwargs)
+        if _DEBUG_ADDRESS_:
+            print(f'{resp.status_code} {resp.reason}')
+        if raise_error:
+            resp.raise_for_status()
         if datatype == str:
             raw = resp.text
         elif datatype == bytes:
@@ -63,22 +74,6 @@ class _cache:
         self.caches[cache_key] = data
 
 cache = _cache()
-
-def _fetch(url:str, **kwargs)->requests.Response:
-    """
-    request to URL, internal use only
-    """
-    if _DEBUG_ADDRESS_:
-        print(url)
-    if 'timeout' in kwargs:
-        timeout = kwargs['timeout']
-        del kwargs['timeout']
-    else:
-        timeout = 3000
-    resp = requests.get(url, timeout=timeout, **kwargs)
-    if _DEBUG_ADDRESS_:
-        print(f'{resp.status_code} {resp.reason}')
-    return resp
 
 def fetch_text(url:str, cache_key:str|None=None)->str:
     """
