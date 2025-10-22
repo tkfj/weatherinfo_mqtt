@@ -1,3 +1,7 @@
+"""
+ナウキャスト
+https://www.jma.go.jp/bosai/nowc/
+"""
 import os
 import math
 

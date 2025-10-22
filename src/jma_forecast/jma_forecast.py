@@ -1,5 +1,6 @@
 """
-番号 天気
+天気予報
+https://www.jma.go.jp/bosai/forecast/
 """
 
 import copy

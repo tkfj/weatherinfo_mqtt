@@ -1,4 +1,6 @@
 """
+AMeDAS
+https://www.jma.go.jp/bosai/map.html#&contents=amedas
 """
 
 import datetime

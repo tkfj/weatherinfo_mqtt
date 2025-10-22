@@ -1,6 +1,7 @@
 """
+地域時系列予報
+https://www.jma.go.jp/bosai/wdist/timeseries.html
 """
-
 from pprint import pprint
 import datetime
 from jma_common import fetch_text, fetch_json, parse_dt_str
