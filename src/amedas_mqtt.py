@@ -1,7 +1,6 @@
 import datetime
 import json
 import os
-import operator
 
 import dotenv
 import paho.mqtt.client as mqtt
@@ -9,12 +8,12 @@ from paho.mqtt.enums import CallbackAPIVersion
 
 from pprint import pprint
 
-from jma_common import parse_dt_str, get_area_cd_office_by_class10,get_area_cd_class10_by_class15,get_area_cd_class15_by_class20,fetch_text,fetch_image
+from jma_common import parse_dt_str, get_area_cd_office_by_class10,get_area_cd_class10_by_class15,get_area_cd_class15_by_class20,get_sunny_or_clear_night
 from jma_amedas import get_amedas_latest_time, get_amedas_point_data_latest, amedas_data_flatten
 from jma_vpfd import get_vpfd_data_pretty
 from jma_forecast import get_forecast_data_pretty
 from jma_nowcast import get_nowc_forecast
-from jma_bunpu import get_bunpu_area_coordinates
+from jma_bunpu import get_bunpu_area_coordinates,get_bunpu_weather
 
 dotenv.load_dotenv()
 
@@ -36,41 +35,17 @@ area_cd_class15 = get_area_cd_class15_by_class20(area_cd_class20)
 area_cd_class10 = get_area_cd_class10_by_class15(area_cd_class15)
 area_cd_office = get_area_cd_office_by_class10(area_cd_class10)
 
-
 amedas_data = amedas_data_flatten(get_amedas_point_data_latest(amedas_point_cd))
 
 bunpu_tile_cd, bunpu_tile_pxl_x, bunpu_tile_pxl_y = get_bunpu_area_coordinates(map_lat,map_lon)
 
 amedas_latest_time = get_amedas_latest_time()
-while True:
-    amedas_latest_time_s = amedas_latest_time.strftime('%Y%m%d%H')+'00'
-    img1 = fetch_image(f'https://www.data.jma.go.jp/bunpu/img/wthr/{bunpu_tile_cd}/wthr_{bunpu_tile_cd}_{amedas_latest_time_s}.png')
-    # ご参考：
-    # 地形地図： https://www.data.jma.go.jp/bunpu/img/bgmap/bg_{bunpu_tile_cd}.jpg
-    # 行政地図： https://www.data.jma.go.jp/bunpu/img/munic/munic_{bunpu_tile_cd}.png
-    if img1 is not None:
-        break
-    amedas_latest_time = amedas_latest_time - datetime.timedelta(hours=1)
-pxl_color=img1.getpixel((bunpu_tile_pxl_x,bunpu_tile_pxl_y))
-match pxl_color:
-    case (0xff, 0xaa, 0x00, 0xff):
-        bunpu_weather = 'sunny' if 6<=amedas_latest_time.hour<18 else 'clear-night'
-    case (0xaa, 0xaa, 0xaa, 0xff):
-        bunpu_weather = 'cloudy'
-    case (0x00, 0x41, 0xff, 0xff):
-        bunpu_weather = 'rainy'
-    case (0xf2, 0xf2, 0xff, 0xff):
-        bunpu_weather = 'snowy'
-    case (0xa0, 0xd2, 0xff, 0xff):
-        bunpu_weather = 'snowy-rainy'
-    case _:
-        bunpu_weather = 'exceptional'
-
+bunpu_weather = get_bunpu_weather(bunpu_tile_cd, bunpu_tile_pxl_x, bunpu_tile_pxl_y, amedas_latest_time)
 
 def convert_vpdf_weather(w: str, dtstr: str|None = None)-> str:
     match w:
         case '晴れ':
-            return 'sunny' if dtstr is None or 6 <= datetime.datetime.fromisoformat(dtstr).hour < 18 else 'clear-night'
+            return get_sunny_or_clear_night(datetime.datetime.fromisoformat(dtstr))
         case 'くもり':
             return 'cloudy'
         case '雨':
@@ -98,39 +73,43 @@ def convert_vpdf_direction(d: str)-> int:
             return 270
         case '北西':
             return 315
-print(pxl_color, bunpu_weather )
 
-# ナウキャスト降雨情報
+# ナウキャスト降水情報
 nowc_forecast = get_nowc_forecast(map_lat,map_lon)
+# 現在及び5分後に降水なしならクリア、それ以外は雨
+nowc_weather = 'clear' if nowc_forecast[0][2]==0 and nowc_forecast[1][2]==0 else 'rainy'
 pprint(nowc_forecast)
-if nowc_forecast[0][2]==0 and nowc_forecast[1][2]==0:
-    nowc_weather = 'clear'
-else:
-    nowc_weather = 'rainy'
 
-if nowc_weather == 'rainy':
-    if amedas_data['temp']>2:
-        overall_weather = 'rainy'
-    elif amedas_data['temp']<0:
-        overall_weather = 'snowy'
-    else:
-        overall_weather = 'snowy-rainy'
-elif bunpu_weather in ['rainy','snowy-rainy','snowy']:
-    overall_weather = 'cloudy'
-    if amedas_data['sun10m']>0:
-        overall_weather = 'clear'
-    else:
-        overall_weather = 'cloudy'
-elif amedas_data['sun10m']>0:
-    overall_weather = 'clear'
-else:
-    overall_weather = bunpu_weather
+def get_overall_weather(amedas_data:any, nowc_weather:str, bunpu_weather:str, dt:datetime):
+    """
+    アメダス、ナウキャスト降水情報、推計気象分布から判断した現在の天気
+    """
+    if nowc_weather == 'rainy':
+        # ナウキャストが雨の場合、降水は確定で、気温に応じて雪の判定
+        if amedas_data['temp']>2:
+            return 'rainy'
+        elif amedas_data['temp']<0:
+            return 'snowy'
+        else:
+            return 'snowy-rainy'
+    elif bunpu_weather in ['rainy','snowy-rainy','snowy']:
+        # (ナウキャストがクリアで)推計気象分布が降水の場合、
+        # アメダスで日照があればクリア、なければ曇り
+        # （たぶん夜間は曇り扱いになってしまうが推計気象分布が降水なら曇りだろう）
+        if amedas_data['sun10m']>0:
+            return get_sunny_or_clear_night(dt)
+        else:
+            return 'cloudy'
+    elif amedas_data['sun10m']>0:
+        # (ナウキャストがクリアで推計気象分布が降水なしで)アメダスで日照があればクリア
+        return get_sunny_or_clear_night(dt)
+    # (ナウキャストがクリアで推計気象分布が降水なしで)アメダスで日照がなければ推計気象分布に従う
+    return bunpu_weather
 
-if overall_weather in ['clear','sunny','clear-night']:
-    overall_weather = 'sunny' if 6<=amedas_latest_time.hour<18 else 'clear-night'
+overall_weather = get_overall_weather(amedas_data, nowc_weather, bunpu_weather, amedas_latest_time)
 
 vpfd=get_vpfd_data_pretty(area_cd_class10)
-fcst=get_forecast_data_pretty(area_cd_office, area_cd_class10)
+fcst=get_forecast_data_pretty(area_cd_class10)
 fcst_h=[
     {
         'datetime': _x['datetime'],

@@ -2,10 +2,10 @@
 推計気象分布
 https://www.data.jma.go.jp/bunpu/
 """
-
+import datetime
 import operator
 
-from jma_common import fetch_text,fetch_image
+from jma_common import fetch_text,fetch_image,get_sunny_or_clear_night
 
 def _center_score_euclid(x, y, w, h):
     """
@@ -51,12 +51,40 @@ def get_bunpu_area_coordinates(lat:float, lon:float) -> tuple:
     # 解像度が高いマップの中で最も中央に近いものを選択
     selected = sorted(bunpu_areas, key=operator.itemgetter('lvl', 's'), reverse=True)[0]
 
-    # 実際のマップを取得し、そのサイズからピクセル位置を特定する
-    # 行政地図： https://www.data.jma.go.jp/bunpu/img/munic/munic_{bunpu_tile_cd}.png
+    # マップ画像を取得し、そのサイズからピクセル位置を特定する
     img=fetch_image(f'https://www.data.jma.go.jp/bunpu/img/munic/munic_{selected["code"]}.png')
     px=int(selected['x'] * img.width)
     py=int(selected['y'] * img.height)
     return selected['code'], px, py
+
+def get_bunpu_weather(tile_cd:str, px:int, py:int, dt:datetime):
+    """
+    推計気象分布の地図から地点の天気を返す
+    """
+    while True: # 最新の時刻が提供されないので、見つかるまで遡り続ける
+        # TODO リミッター
+        dt_s = dt.strftime('%Y%m%d%H')+'00'
+        img = fetch_image(f'https://www.data.jma.go.jp/bunpu/img/wthr/{tile_cd}/wthr_{tile_cd}_{dt_s}.png', raise_error=False)
+        # ご参考：
+        # 地形地図： https://www.data.jma.go.jp/bunpu/img/bgmap/bg_{tile_cd}.jpg
+        # 行政地図： https://www.data.jma.go.jp/bunpu/img/munic/munic_{tile_cd}.png
+        if img is not None:
+            break
+        dt = dt - datetime.timedelta(hours=1)
+    pxl_color=img.getpixel((px,py))
+    match pxl_color:
+        case (0xff, 0xaa, 0x00, 0xff):
+            return get_sunny_or_clear_night(dt)
+        case (0xaa, 0xaa, 0xaa, 0xff):
+            return 'cloudy'
+        case (0x00, 0x41, 0xff, 0xff):
+            return 'rainy'
+        case (0xf2, 0xf2, 0xff, 0xff):
+            return 'snowy'
+        case (0xa0, 0xd2, 0xff, 0xff):
+            return 'snowy-rainy'
+        case _:
+            return 'unknown'
 
 if __name__ == '__main__':
     import os
@@ -68,4 +96,7 @@ if __name__ == '__main__':
     # map_lat=43.0685983
     # map_lon=141.3507201
 
-    print(get_bunpu_area_coordinates(map_lat,map_lon))
+    (cd,x,y) = get_bunpu_area_coordinates(map_lat,map_lon)
+    print((cd,x,y))
+    weather = get_bunpu_weather(cd, x, y, datetime.datetime.now())
+    print(weather)

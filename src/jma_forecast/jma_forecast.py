@@ -6,104 +6,56 @@ https://www.jma.go.jp/bosai/forecast/
 import copy
 from pprint import pprint
 import datetime
+import json
+import os
 from jma_common import fetch_json, parse_dt_str, format_dt_str, get_area_cd_office_by_class10
 
+forecast_url_format : str = 'https://www.jma.go.jp/bosai/forecast/data/forecast/{area_cd_office}.json'
 
-forecast_url_format : str = 'https://www.jma.go.jp/bosai/forecast/data/forecast/{area_cd}.json'
+def _load_weather_codes():
+    module_path = os.path.abspath(__file__)
+    module_dir = os.path.dirname(module_path)
+    json_path = os.path.join(module_dir, 'telops.json')
+    print(module_path, module_dir, json_path)
+    with open(json_path, 'rt', encoding='utf-8') as jsonf:
+        json_raw = json.load(jsonf)
+    return {
+        _k:{
+            'icon_day': _v[0],
+            'icon_night': _v[1],
+            'primary_weather': _v[2],
+            'label_ja': _v[3],
+            'label_en': _v[4],
+        } for _k, _v in json_raw.items()
+    }
 
-weather_code_labels = {
-    '100': '晴れ',
-    '101': '晴れ時々くもり',
-    '102': '晴れ一時雨',
-    '103': '晴れ時々雨',
-    '104': '晴れ一時雪',
-    '105': '晴れ時々雪',
-    '106': '晴れ一時雨か雪',
-    '107': '晴れ時々雨か雪',
-    '110': '晴れ後時々くもり',
-    '111': '晴れ後くもり',
-    '112': '晴れ後一時雨',
-    '113': '晴れ後時々雨',
-    '114': '晴れ後雨',
-    '115': '晴れ後一時雪',
-    '116': '晴れ後時々雪',
-    '117': '晴れ後雪',
-    '118': '晴れ後雨か雪',
-    '160': '晴れ一時雪か雨',
-    '170': '晴れ時々雪か雨',
-    '181': '晴れ後雪か雨',
-    '200': 'くもり',
-    '201': 'くもり時々晴れ',
-    '202': 'くもり一時雨',
-    '203': 'くもり時々雨',
-    '204': 'くもり一時雪',
-    '205': 'くもり時々雪',
-    '206': 'くもり一時雨か雪',
-    '207': 'くもり時々雨か雪',
-    '210': 'くもり後時々晴れ',
-    '211': 'くもり後晴れ',
-    '212': 'くもり後一時雨',
-    '213': 'くもり後時々雨',
-    '214': 'くもり後雨',
-    '215': 'くもり後一時雪',
-    '216': 'くもり後時々雪',
-    '217': 'くもり後雪',
-    '218': 'くもり後雨か雪',
-    '260': 'くもり一時雪か雨',
-    '270': 'くもり時々雪か雨',
-    '281': 'くもり後雪か雨',
-    '300': '雨',
-    '301': '雨時々晴れ',
-    '302': '雨時々止む',
-    '303': '雨時々雪',
-    '304': '雨か雪',
-    '308': '雨で暴風を伴う',
-    '309': '雨一時雪',
-    '311': '雨後晴れ',
-    '313': '雨後くもり',
-    '314': '雨後時々雪',
-    '315': '雨後雪',
-    '316': '雨か雪後晴れ',
-    '317': '雨か雪後くもり',
-    '340': '雪か雨',
-    '361': '雪か雨後晴れ',
-    '371': '雪か雨後くもり',
-    '400': '雪',
-    '401': '雪時々晴れ',
-    '402': '雪時々止む',
-    '403': '雪時々雨',
-    '406': '風雪強い',
-    '407': '暴風雪',
-    '409': '雪一時雨',
-    '411': '雪後晴れ',
-    '413': '雪後くもり',
-    '414': '雪後雨',
-}
+_weather_codes = _load_weather_codes()
 
-def get_forecast_url(area_cd: str) -> str:
+def get_forecast_url(area_cd_office: str) -> str:
     return forecast_url_format.format(
-        area_cd = area_cd,
+        area_cd_office = area_cd_office,
     )
 
-def get_forecast_data_raw(area_cd: str) -> dict:
-    url : str = get_forecast_url(area_cd)
+def get_forecast_data_raw(area_cd_office: str) -> dict:
+    url : str = get_forecast_url(area_cd_office)
     data_raw : dict = fetch_json(url)
     # pprint(data_raw)
     return data_raw
 
-def get_forecast_data_sub(area_cd: str, area_sub_cd: str) -> dict:
+def get_forecast_data_sub(area_cd_class10: str) -> dict:
+    area_code_office = get_area_cd_office_by_class10(area_cd_class10)
     def sel(parent:dict):
-        _a = parent['areas'] 
+        _a = parent['areas']
         del parent['areas']
         parent['areas'] = _a[areaidx]
 
-    data_raw : dict = get_forecast_data_raw(area_cd)
+    data_raw : dict = get_forecast_data_raw(area_code_office)
     for _i, _a in enumerate(data_raw[0]['timeSeries'][0]['areas']):
-        if _a['area']['code']==area_sub_cd:
+        if _a['area']['code']==area_cd_class10:
             areaidx:int = _i
             break
     else:
-        raise ValueError(f'area sub code not found: {area_sub_cd}')
+        raise ValueError(f'area sub code not found: {area_cd_class10}')
     data_sel = copy.deepcopy(data_raw)
     for _as in data_sel[0]['timeSeries']:
         sel(_as)
@@ -115,8 +67,8 @@ def get_forecast_data_sub(area_cd: str, area_sub_cd: str) -> dict:
     sel(data_sel[1]['tempAverage'])
     return data_sel
 
-def get_forecast_data_pretty(area_cd: str, area_sub_cd: str) -> dict:
-    data_sel : dict = get_forecast_data_sub(area_cd, area_sub_cd)
+def get_forecast_data_pretty(area_cd_class10: str) -> dict:
+    data_sel : dict = get_forecast_data_sub(area_cd_class10)
     # pprint(data_sel)
     ts3:dict = dict()
     ts7:dict = dict()
@@ -184,16 +136,16 @@ def get_forecast_data_pretty(area_cd: str, area_sub_cd: str) -> dict:
             temps_min = None
         if "weatherCodes" in _d:
             weather_code = _d["weatherCodes"]
-            weather_label = weather_code_labels[weather_code]
+            weather_label = _weather_codes[weather_code]['label_ja']
             if '雪' in weather_label and '雨' in weather_label:
                 weather_label_hass = 'snowy-rainy'
             elif '雪' in weather_label:
                 weather_label_hass = 'snowy'
             elif '雨' in weather_label:
                 weather_label_hass = 'rainy'
-            elif '晴れ' == weather_label:
+            elif '晴' == weather_label:
                 weather_label_hass = 'sunny'
-            elif 'くもり' == weather_label:
+            elif '曇' == weather_label:
                 weather_label_hass = 'cloudy'
             else:
                 weather_label_hass = 'partlycloudy'
@@ -213,6 +165,5 @@ def get_forecast_data_pretty(area_cd: str, area_sub_cd: str) -> dict:
 
 if __name__ == '__main__':
     area_cd : str = '130010' # 東京-東京
-    area_cd_parent : str = get_area_cd_office_by_class10(area_cd)
-    data_j : dict = get_forecast_data_pretty(area_cd_parent, area_cd)
+    data_j : dict = get_forecast_data_pretty(area_cd)
     pprint(data_j)

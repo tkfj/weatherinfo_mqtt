@@ -13,4 +13,5 @@ from .jma_common import (
     get_area_cd_office_by_class10,
     get_area_cd_class10_by_class15,
     get_area_cd_class15_by_class20,
+    get_sunny_or_clear_night,
 )

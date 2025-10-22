@@ -10,7 +10,8 @@ from PIL import Image
 
 _DEBUG_ADDRESS_ = True
 
-area_url : str = 'https://www.jma.go.jp/bosai/common/const/area.json'
+area_url: str = 'https://www.jma.go.jp/bosai/common/const/area.json'
+area_xy_url: str = 'https://www.jma.go.jp/bosai/common/const/xy.json'
 
 class _cache:
     """
@@ -117,6 +118,12 @@ def fetch_area(use_cache:bool=True):
     """
     return fetch_json(area_url, cache_key='area' if use_cache else None)
 
+def fetch_area_xy(use_cache:bool=True):
+    """
+    fetch `area xy` data
+    """
+    return fetch_json(area_xy_url, cache_key='area_xy' if use_cache else None)
+
 def get_area_cd_center_by_office(office_cd:str, use_cache:bool=True)-> str:
     """
     get area_cd of center by office in `area` data
@@ -144,3 +151,21 @@ def get_area_cd_class15_by_class20(class20_cd:str, use_cache:bool=True)-> str:
     """
     area_data = fetch_area(use_cache=use_cache)
     return area_data['class20s'][class20_cd]['parent']
+
+def get_area_xy(area_cd:str, use_cache:bool=True)-> list:
+    """
+    get area_xy of center, office, class20 in `area_xy` data
+    """
+    area_xy_data = fetch_area_xy(use_cache=use_cache)
+    return (
+        area_xy_data['center'][area_cd] if 'area_cd' in area_xy_data['center']
+        else area_xy_data['office'][area_cd] if 'area_cd' in area_xy_data['office']
+        else area_xy_data['class20'][area_cd]
+    )
+
+def get_sunny_or_clear_night(dt:datetime)->str:
+    """
+    時刻に応じて`sunny`か`clear-night`を返す
+    """
+    return 'sunny' if 6<=dt.hour<18 else 'clear-night'
+
