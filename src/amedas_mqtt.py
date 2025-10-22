@@ -129,6 +129,9 @@ fcst_d=[
         'templow':_x['temp_min'],
     } for _t,_x in fcst.items() if parse_dt_str(_t) > datetime.datetime.now().astimezone(datetime.timezone.utc)
 ]
+# アメダスの風向を角度に変換。16は風が弱くて特定できていない状態
+amedas_data['windDirection'] = float(amedas_data['windDirection'] * 22.5) if amedas_data['windDirection']<16 else None
+amedas_data['gustDirection'] = float(amedas_data['gustDirection'] * 22.5) if amedas_data['gustDirection']<16 else None
 amedas_data['nowc_weather'] = nowc_weather
 amedas_data['bunpu_weather'] = bunpu_weather
 amedas_data['overall_weather'] = overall_weather
