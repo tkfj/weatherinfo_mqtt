@@ -138,7 +138,7 @@ amedas_data['overall_weather'] = overall_weather
 amedas_data['forecast_hourly'] = fcst_h
 amedas_data['forecast_daily'] = fcst_d
 for _i, _x in enumerate(nowc_forecast):
-    amedas_data[f'nowc_rain_{_i*5:02d}']=min(_i,7)
+    amedas_data[f'nowc_rain_{_i*5:02d}']=_x[2]
 
 pprint(amedas_data)
 
