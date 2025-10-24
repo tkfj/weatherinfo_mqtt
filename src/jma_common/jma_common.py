@@ -51,12 +51,10 @@ class _cache:
         if raise_error:
             resp.raise_for_status()
         if datatype == str:
-            raw = resp.text
+            return resp.text
         elif datatype == bytes:
-            raw = resp.content
-        else:
-            raise ValueError(f'invalid datatype: {datatype}')
-        return raw
+            return resp.content
+        raise ValueError(f'invalid datatype: {datatype}')
 
     def del_cache(self, cache_key:str):
         """
@@ -83,8 +81,10 @@ def fetch_json(url:str, cache_key:str|None=None, **kwargs)->any:
     """
     fetch json data from URL
     """
-    json_raw = fetch_text(url,cache_key=cache_key, **kwargs)
-    json_obj = json.loads(json_raw)
+    text = fetch_text(url,cache_key=cache_key, **kwargs)
+    if text is None: # raise errorがFalseで404など
+        return None
+    json_obj = json.loads(text)
     return json_obj
 
 def fetch_binary(url:str, cache_key:str|None=None, **kwargs)->any:
@@ -98,6 +98,8 @@ def fetch_image(url:str, cache_key:str|None=None, **kwargs)->any:
     fetch image from URL
     """
     binary = fetch_binary(url, cache_key, **kwargs)
+    if binary is None: # raise errorがFalseで404など
+        return None
     return  Image.open(BytesIO(binary))
 
 def parse_dt_str(dt_str:str)->datetime.datetime:
