@@ -2,7 +2,6 @@ import datetime
 import json
 import os
 
-import dotenv
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
@@ -15,8 +14,6 @@ from jma_forecast import get_forecast_data_pretty
 from jma_nowcast import get_nowc_forecast
 from jma_bunpu import get_bunpu_area_coordinates,get_bunpu_weather
 
-dotenv.load_dotenv()
-
 mqtt_broker = os.environ.get('MQTT_BROKER')
 mqtt_port = int(os.environ.get('MQTT_PORT','1883'))
 mqtt_username = os.environ.get('MQTT_USERNAME')
@@ -26,7 +23,7 @@ mqtt_topic_amedas_attr = os.environ.get('MQTT_TOPIC_AMEDAS_ATTR')
 mqtt_topic_amedas_avty = os.environ.get('MQTT_TOPIC_AMEDAS_AVTY')
 
 map_lat=float(os.environ['NOWCAST_RAIN_LAT'])
-map_lon=float(os.environ['NOWCAST_RAIN_LNG'])
+map_lon=float(os.environ['NOWCAST_RAIN_LON'])
 
 amedas_point_cd = os.environ.get('JMA_AMEDAS_POINT_CD')
 

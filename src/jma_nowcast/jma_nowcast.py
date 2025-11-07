@@ -62,10 +62,10 @@ amount_by_level={
 }
 
 
-def latlng_to_tile_pixel(lat, lng, zoom):
+def latlon_to_tile_pixel(lat, lon, lvl):
     lat_rad = math.radians(lat)
-    n = 2 ** zoom
-    x = (lng + 180.0) / 360.0
+    n = 2 ** lvl
+    x = (lon + 180.0) / 360.0
     y = (1.0 - math.log(math.tan(lat_rad) + 1 / math.cos(lat_rad)) / math.pi) / 2.0
 
     tile_x = int(x * n)
@@ -76,6 +76,24 @@ def latlng_to_tile_pixel(lat, lng, zoom):
     return tile_x, tile_y, pixel_x, pixel_y
 
 
+def tile_pixel_to_latlon(tile_x, tile_y, pixel_x, pixel_y, lvl):
+    n = 2 ** lvl
+    gx = tile_x * 256 + pixel_x
+    gy = tile_y * 256 + pixel_y
+
+    x = gx / (256.0 * n)
+    y = gy / (256.0 * n)
+
+    lon = x * 360.0 - 180.0
+    lat_rad = math.atan(math.sinh(math.pi * (1.0 - 2.0 * y)))
+    lat = math.degrees(lat_rad)
+ 
+    return lat,lon
+
+def meters_per_pixel(lat, lvl):
+    # マジックナンバーは赤道の距離を256で割ったもの
+    return (156543.03392 * math.cos(math.radians(lat))) / (2 ** lvl)
+
 def load_image_url(url):
     binary:bytes = fetch_binary(url)
     img_raw = Image.open(BytesIO(binary))
@@ -83,27 +101,79 @@ def load_image_url(url):
     img_cnv = img_raw.convert('RGBA')
     return img_cnv
 
-def load_rain_image_one(lvl: int, tilex: int, tiley: int, basetime: str, validtime: str) -> Image:
+def load_base_image_one(lvl: int, tilex: int, tiley: int) -> Image.Image:
+    url = f'https://www.jma.go.jp/tile/gsi/pale/{lvl}/{tilex}/{tiley}.png'
+    img = load_image_url(url)
+    if _DEBUG_STORE_IMG_:
+        img.save(f'./base_img_{lvl}_{tilex}_{tiley}.png')
+    return img
+
+def load_base_image_join(lvl: int, lat:float, lon: float, radius_meter: int) -> Image.Image:
+    img = load_image_join(lvl, lat, lon, radius_meter, lambda lvl,x,y : load_base_image_one(lvl,x,y))
+    if _DEBUG_STORE_IMG_:
+        img.save(f'./base_img_join_{lvl}.png')
+    return img
+
+def load_rain_image_one(lvl: int, tilex: int, tiley: int, basetime: str, validtime: str) -> Image.Image:
     url=f'https://www.jma.go.jp/bosai/jmatile/data/nowc/{basetime}/none/{validtime}/surf/hrpns/{lvl}/{tilex}/{tiley}.png'
+    img = load_image_url(url)
+    if _DEBUG_STORE_IMG_:
+        img.save(f'./rain_img_{lvl}_{tilex}_{tiley}_{basetime}_{validtime}.png')
     return load_image_url(url)
 
+def load_rain_image_join(lvl: int, lat:float, lon: float, radius_meter: int, basetime: str, validtime: str) -> Image.Image:
+    img = load_image_join(lvl, lat, lon, radius_meter, lambda lvl,x,y : load_rain_image_one(lvl,x,y,basetime,validtime))
+    if _DEBUG_STORE_IMG_:
+        img.save(f'./rain_img_join_{lvl}_{basetime}_{validtime}.png')
+    return img
 
-def get_nowc_forecast(lat,lon,zoom=10):
-    if zoom>14:
+def get_rain_images_join_forecast(lat,lon,radius_meter,lvl=10):
+    nowc_times = get_nowc_forecast_times()
+    return [load_rain_image_join(lvl,lat,lon,radius_meter,_t['basetime'],_t['validtime']) for _t in nowc_times]
+
+def load_image_join(lvl: int, lat:float, lon: float, radius_meter: int, load_one_func) -> Image.Image:
+    print(lvl,lat,lon,radius_meter)
+    tx0,ty0,px0,py0 = latlon_to_tile_pixel(lat,lon,lvl)
+    mpp = meters_per_pixel(lat,lvl)
+    pxls = int(radius_meter / mpp)
+    gx1 = tx0 * 256 + px0 - pxls
+    gy1 = ty0 * 256 + py0 - pxls
+    gx2 = tx0 * 256 + px0 + pxls
+    gy2 = ty0 * 256 + py0 + pxls
+    tx1, px1 = divmod(gx1, 256)
+    ty1, py1 = divmod(gy1, 256)
+    tx2, px2 = divmod(gx2, 256)
+    ty2, py2 = divmod(gy2, 256)
+    img_join = Image.new("RGBA", ((tx2-tx1+1)*256,(ty2-ty1+1)*256))
+    for x in range(tx1, tx2+1):
+        for y in range(ty1, ty2+1):
+            img_one = load_one_func(lvl,x,y)
+            img_join.paste(img_one,((x-tx1)*256,(y-ty1)*256))
+    img_crop = img_join.crop((
+        px1,
+        py1,
+        (tx2-tx1)*256+px2,
+        (ty2-ty1)*256+py2,
+    ))
+    return img_crop
+
+def get_rain_zoom(lvl):
+    "降雨レーダーのズームレベルは4,6,8,10のみ"
+    if lvl>14:
         raise ValueError('Zoomレベルは4から14の間で指定してください')
-    elif zoom>=10:
-        rain_zoom=10
-    elif zoom>=8:
-        rain_zoom=8
-    elif zoom>=6:
-        rain_zoom=6
-    elif zoom>=4:
-        rain_zoom=4
-    else :
+    elif lvl>=10:
+        rain_lvl=10
+    elif lvl>=8:
+        rain_lvl=8
+    elif lvl>=6:
+        rain_lvl=6
+    elif lvl>=4:
+        rain_lvl=4
+    else:
         raise ValueError('Zoomレベルは4から14の間で指定してください')
+    return rain_lvl
 
-    rain_tile_x, rain_tile_y, rain_pxl_x, rain_pxl_y = latlng_to_tile_pixel(lat, lon, rain_zoom)
-
+def get_nowc_forecast_times():
     # N1 過去のタイムライン basetimeとvalidtimeは同じ elementsにhrpnsが含まれる(降雨ナウキャスト)
     # N2 basetimeはN1の最新と同じ(N2が更新が遅く1世代前のこともある)、validtimeがbasetimeの未来時刻で5分間隔で60分後まで(１２枚)
     # N3 elementsがその他諸々（雷とか）
@@ -113,6 +183,14 @@ def get_nowc_forecast(lat,lon,zoom=10):
     nowc_times = copy.deepcopy(nowc_json2)
     nowc_times.append(nowc_current)
     nowc_times.sort(key=lambda x:(-int(x['basetime']),int(x['validtime'])))
+    return nowc_times
+
+def get_nowc_forecast(lat,lon,zoom=10):
+    rain_zoom = get_rain_zoom(zoom)
+
+    rain_tile_x, rain_tile_y, rain_pxl_x, rain_pxl_y = latlon_to_tile_pixel(lat, lon, rain_zoom)
+
+    nowc_times = get_nowc_forecast_times()
 
     colors=[]
     levels=[]
@@ -139,11 +217,45 @@ def get_nowc_forecast(lat,lon,zoom=10):
     ]
     return ret
 
+def rain_composite(base_img, rain_img):
+    resized_img = rain_img.resize((base_img.width, base_img.height), resample=Image.BOX)
+    rain_composite = Image.composite(
+        resized_img, base_img,
+        Image.eval(resized_img.getchannel('A'), lambda a: 0xCC if a > 0 else 0x33)
+    )
+    return rain_composite
+
+def get_nowc_forecast_images(lat,lon,radius_meter,lvl=10):
+    rain_lvl = get_rain_zoom(lvl)
+    base_img = load_base_image_join(lvl,lat,lon, radius_meter)
+    rain_imgs = get_rain_images_join_forecast(lat,lon, radius_meter, lvl=rain_lvl)
+    composite_imgs = [rain_composite(base_img, _img) for _img in rain_imgs]
+    return composite_imgs
+
+def load_and_save_nowc_forecast_images(path, lat,lon,radius_meter,lvl=10, duration_base:int=2000, duration_rest:int=500, loop:int=0):
+    imgs = get_nowc_forecast_images(lat,lon,radius_meter,lvl)
+    save_ani_png(path,imgs,duration_base,duration_rest,loop)
+
+def save_ani_png(path:str, imgs:List[Image.Image], duration_base:int=2000, duration_rest:int=500, loop:int=0):
+    ani_base, ani_rest = imgs[0], imgs[1:]
+    ani_base.save(
+        path,
+        format='PNG',
+        save_all = True,
+        append_images = ani_rest,
+        duration = [duration_base, *([duration_rest]*len(ani_rest))],
+        loop = loop,
+        disposal = 0,
+        blend = 0,
+        default_image = False,
+    )
+
 
 if __name__ == '__main__':
     import dotenv
     dotenv.load_dotenv()
     map_lat=float(os.environ['NOWCAST_RAIN_LAT'])
-    map_lon=float(os.environ['NOWCAST_RAIN_LNG'])
+    map_lon=float(os.environ['NOWCAST_RAIN_LON'])
     map_zoom=int(os.environ['NOWCAST_RAIN_ZOOM'])
-    nowc_forecast = get_nowc_forecast(map_lat, map_lon, zoom=map_zoom)
+    # nowc_forecast = get_nowc_forecast(map_lat, map_lon, lvl=map_zoom)
+    load_and_save_nowc_forecast_images('./animated.png',map_lat,map_lon,10_000,lvl=map_zoom)

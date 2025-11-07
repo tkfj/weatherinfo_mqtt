@@ -1,2 +1,17 @@
-include:
-  - ../docker-compose.yml
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+
+    volumes:
+      - type: bind
+        source: ..
+        target: /usr/src/app
+        consistency: cached
+      - type: bind
+        source: ~/.ssh
+        target: /home/appuser/.ssh
+        read_only: true
+
+    restart: "no" #終了時にコンテナ削除
